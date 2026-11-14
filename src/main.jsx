@@ -28,7 +28,11 @@ import {
   FileText,
   ArrowRight,
   Info,
-  PlusCircle
+  PlusCircle,
+  AlertTriangle,
+  Clock,
+  ShieldAlert,
+  KeyRound
 } from 'lucide-react';
 import { ClipboardList } from 'lucide-react';
 import './style.css';
@@ -136,6 +140,10 @@ function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [pwdModal, setPwdModal] = useState(false);
+  const [pwdForm, setPwdForm] = useState({ actual: '', nueva: '' });
+  const [resumen, setResumen] = useState(null);
+  const [desactualizados, setDesactualizados] = useState([]);
 
   const [productos, setProductos] = useState([]);
   const [predios, setPredios] = useState([]);
@@ -191,6 +199,9 @@ function App() {
     latitud: '',
     longitud: ''
   });
+
+  const isStaff = ['EXTENSIONISTA', 'ENTIDAD', 'ADMIN'].includes(user?.rol);
+  const canCreateLot = ['PRODUCTOR', 'EXTENSIONISTA', 'ADMIN'].includes(user?.rol);
 
   const fail = e => {
     setError(e.message || 'Ocurrió un error inesperado.');
@@ -310,11 +321,22 @@ function App() {
     setError('');
 
     try {
-      const [p, pr, l] = await Promise.all([
+      const me = await request('/auth/me', { token });
+      setUser(me);
+      localStorage.setItem('siga_user', JSON.stringify(me));
+
+      const baseCalls = [
         request('/catalogos/productos'),
         request('/predios?limit=100&page=1', { token }),
         request('/lotes?limit=100&page=1', { token })
-      ]);
+      ];
+
+      if (['ENTIDAD', 'EXTENSIONISTA', 'ADMIN'].includes(me.rol)) {
+        baseCalls.push(request('/dashboard/resumen', { token }).catch(() => null));
+        baseCalls.push(request('/dashboard/lotes-desactualizados', { token }).catch(() => []));
+      }
+
+      const [p, pr, l, resDash, desactDash] = await Promise.all(baseCalls);
 
       const ps = rows(p);
       const fs = rows(pr);
@@ -323,6 +345,8 @@ function App() {
       setProductos(ps);
       setPredios(fs);
       setLotes(ls);
+      if (resDash) setResumen(resDash);
+      if (desactDash) setDesactualizados(rows(desactDash));
 
       setForm(f => ({
         ...f,
@@ -607,6 +631,26 @@ function App() {
     }
   }
 
+  async function changePassword(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await request('/auth/cambiar-password', {
+        token,
+        method: 'POST',
+        body: JSON.stringify(pwdForm)
+      });
+      setNotice('Contraseña actualizada correctamente.');
+      setPwdForm({ actual: '', nueva: '' });
+      setPwdModal(false);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Consulta pública del historial de trazabilidad.
   const searchTrace = useCallback(async (e) => {
     e?.preventDefault();
@@ -668,6 +712,7 @@ function App() {
         error={error}
         busy={busy}
         onSearch={searchTrace}
+        onBackToLogin={!token ? () => { setPage('dashboard'); setError(''); } : null}
       />
     );
   }
@@ -685,6 +730,7 @@ function App() {
         login={login}
         busy={busy}
         error={error}
+        onOpenPublic={() => { setError(''); setPage('public'); }}
       />
     );
   }
@@ -758,7 +804,7 @@ function App() {
             <span>
               Acceso institucional
               <br />
-              <b>Sesión protegida</b>
+              <b>{user?.entidad_sigla ? `Entidad: ${user.entidad_sigla}` : 'Sesión protegida'}</b>
             </span>
           </div>
 
@@ -770,10 +816,14 @@ function App() {
             </div>
             <div>
               <b>{user?.nombre || user?.email || 'Usuario'}</b>
-              <small>{user?.rol || 'Usuario'}</small>
+              <small>{user?.rol || 'Usuario'}{user?.entidad_sigla ? ` · ${user.entidad_sigla}` : ''}</small>
             </div>
           </div>
 
+          <button className="nav" onClick={() => setPwdModal(true)}>
+            <KeyRound />
+            <span>Cambiar contraseña</span>
+          </button>
           <button className="nav" onClick={logout}>
             <LogOut />
             <span>Cerrar sesión</span>
@@ -813,7 +863,7 @@ function App() {
           </div>
 
           <span className="top-user">
-            <i /> Entorno de gestión
+            <i /> {user?.rol}{user?.entidad_sigla ? ` (${user.entidad_sigla})` : ''}
           </span>
         </header>
 
@@ -839,8 +889,36 @@ function App() {
           {notice && (
             <div className="alert success" role="status">
               <CheckCircle2 />
-              {notice}
+              <span>{notice}</span>
+              <button aria-label="Cerrar notificación" onClick={() => setNotice('')}><X /></button>
             </div>
+          )}
+
+          {pwdModal && (
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="section-kicker">SEGURIDAD DE CUENTA</p>
+                  <h2>Cambiar contraseña</h2>
+                </div>
+                <button className="text-button" onClick={() => setPwdModal(false)}>Cancelar</button>
+              </div>
+              <form className="module-form" onSubmit={changePassword}>
+                <div className="module-fields">
+                  <label className="module-field">
+                    Contraseña actual
+                    <input type="password" required value={pwdForm.actual}
+                      onChange={e => setPwdForm({ ...pwdForm, actual: e.target.value })} />
+                  </label>
+                  <label className="module-field">
+                    Nueva contraseña (mínimo 8 caracteres)
+                    <input type="password" minLength={8} required value={pwdForm.nueva}
+                      onChange={e => setPwdForm({ ...pwdForm, nueva: e.target.value })} />
+                  </label>
+                </div>
+                <button className="primary-button" disabled={busy}>Actualizar contraseña</button>
+              </form>
+            </section>
           )}
 
           {page === 'gestion' ? (
@@ -862,23 +940,43 @@ function App() {
                 busy={busy}
               />
 
-              <div className="stats">
-                <Stat
-                  icon={<Package />}
-                  label="Lotes registrados"
-                  value={lotes.length}
-                />
-                <Stat
-                  icon={<MapPin />}
-                  label="Predios disponibles"
-                  value={predios.length}
-                />
-                <Stat
-                  icon={<Leaf />}
-                  label="Productos en catálogo"
-                  value={productos.length}
-                />
-              </div>
+              {isStaff && resumen ? (
+                <>
+                  <div className="stats">
+                    <Stat icon={<ShieldCheck />} label={`Productores (${resumen.productores?.validados ?? 0} validados)`} value={resumen.productores?.total ?? 0} />
+                    <Stat icon={<MapPin />} label={`Predios (${resumen.predios?.verificados ?? 0} verificados)`} value={resumen.predios?.total ?? 0} />
+                    <Stat icon={<Package />} label={`Lotes (${resumen.lotes?.bloqueados ?? 0} bloqueados)`} value={resumen.lotes?.total ?? 0} />
+                    <Stat icon={<AlertTriangle />} label="Alertas sanitarias abiertas" value={resumen.alertas_sanitarias_abiertas ?? 0} />
+                    <Stat icon={<FileText />} label={`Exportaciones (${resumen.exportaciones?.aprobadas ?? 0} aprobadas)`} value={`${resumen.exportaciones?.pendientes ?? 0} pend.`} />
+                    <Stat icon={<Clock />} label={`KPI Trazabilidad < 24h (Meta ${resumen.kpis?.meta_pct_actualizados_24h ?? 70}%)`} value={resumen.kpis?.pct_lotes_actualizados_24h != null ? `${resumen.kpis.pct_lotes_actualizados_24h}%` : 'N/A'} />
+                  </div>
+                  {desactualizados.length > 0 && (
+                    <section className="panel">
+                      <div className="panel-head"><div>
+                        <p className="section-kicker">ALERTA OPERATIVA (REGLA 21/22)</p>
+                        <h2>Lotes en curso sin actualización en más de 24 horas</h2>
+                        <p className="sub">{desactualizados.length} lotes requieren seguimiento en campo.</p>
+                      </div></div>
+                      <div className="table-wrap"><table>
+                        <thead><tr><th>Código</th><th>Producto</th><th>Predio</th><th>Estado</th><th>Horas sin actualizar</th></tr></thead>
+                        <tbody>{desactualizados.slice(0, 5).map((d, idx) => (
+                          <tr key={d.lote_id || d.id || idx}>
+                            <td className="mono">{d.codigo_trazabilidad}</td><td><b>{d.producto}</b></td>
+                            <td>{d.predio}</td><td><span className="status-tag">{d.estado}</span></td>
+                            <td><b>{d.horas_sin_actualizar} h</b></td>
+                          </tr>
+                        ))}</tbody>
+                      </table></div>
+                    </section>
+                  )}
+                </>
+              ) : (
+                <div className="stats">
+                  <Stat icon={<Package />} label="Lotes registrados" value={lotes.length} />
+                  <Stat icon={<MapPin />} label="Predios disponibles" value={predios.length} />
+                  <Stat icon={<Leaf />} label="Productos en catálogo" value={productos.length} />
+                </div>
+              )}
 
               <section className="panel">
                 <div className="panel-head">
@@ -957,7 +1055,7 @@ function App() {
                 busy={busy}
               />
 
-              <div className="two-col">
+              {canCreateLot && <div className="two-col">
                 <section className="panel">
                   <div className="panel-head">
                     <div>
@@ -1202,7 +1300,7 @@ function App() {
                     </div>
                   )}
                 </section>
-              </div>
+              </div>}
 
               <section className="panel">
                 <div className="panel-head responsive-head">
@@ -1599,7 +1697,8 @@ function LoginPage({
   setShowPassword,
   login,
   busy,
-  error
+  error,
+  onOpenPublic
 }) {
   return (
     <div className="login-page">
@@ -1613,9 +1712,14 @@ function LoginPage({
 
       <header className="login-header">
         <GovBrand />
-        <span className="header-classification">
+        <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+          <button type="button" className="secondary-button" onClick={onOpenPublic}>
+            <QrCode /> Consulta ciudadana QR
+          </button>
+          <span className="header-classification">
           PORTAL INSTITUCIONAL
-        </span>
+          </span>
+        </div>
       </header>
 
       <main className="login-layout">
@@ -1858,7 +1962,8 @@ function PublicPage({
   trace,
   error,
   busy,
-  onSearch
+  onSearch,
+  onBackToLogin
 }) {
   const events = Array.isArray(trace?.linea_tiempo)
     ? trace.linea_tiempo
@@ -1879,8 +1984,11 @@ function PublicPage({
 
       <header className="public-header">
         <GovBrand />
-        <div className="public-siga">
+        <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+          {onBackToLogin && <button type="button" className="secondary-button" onClick={onBackToLogin}>Volver al inicio de sesión</button>}
+          <div className="public-siga">
           <Sprout /> SIGA
+          </div>
         </div>
       </header>
 
@@ -2073,4 +2181,4 @@ function InfoItem({ label, value }) {
 }
 
 // Iniciar aplicación.
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(<App />); 

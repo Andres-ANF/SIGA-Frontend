@@ -42,7 +42,79 @@ export default function Modules({api,user,onError,onNotice}){
  return <><div className="page-heading"><div><p className="eyebrow">OPERACIÓN INSTITUCIONAL</p><h1>Gestión integral SIGA</h1><p className="sub">Módulos conectados a los servicios del backend según los permisos de tu cuenta.</p></div><button className="secondary-button" onClick={load} disabled={busy}><RefreshCw/>{busy?' Actualizando':' Actualizar datos'}</button></div><div className="module-tabs">{TABS.filter(([k])=>k!=='usuarios'&&k!=='auditoria'||admin).map(([k,n])=><button key={k} className={tab===k?'selected':''} onClick={()=>{setTab(k);setSearch('');setForm({});setDetail(null)}}>{n}</button>)}</div><section className="panel"><div className="panel-head"><div><p className="section-kicker">MÓDULO</p><h2>{titles[tab]}</h2><p className="sub">{tab==='sync'?'Descarga un paquete de datos y consulta el estado de sincronización.':'Consulta y gestiona los registros autorizados para tu perfil.'}</p></div></div>
  {createForm()&&<form className="module-form" onSubmit={submit}><h3>Registrar nuevo</h3><div className="module-fields">{createForm()}</div><button className="primary-button" disabled={busy}>Guardar registro</button></form>}
  {tab==='sync'?<><div className="sync-card"><Database/><div><h3>Paquete local de datos</h3><p className="sub">Incluye lotes, predios, productos y tipos de evento disponibles para operar sin conexión.</p><button className="secondary-button" onClick={()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='siga-bootstrap.json';a.click();URL.revokeObjectURL(a.href)}}><Download/> Descargar paquete</button></div><span>{data?.generado_en?date(data.generado_en):'Sin cargar'}</span></div><form className="module-form" onSubmit={addOffline}><h3>Registrar evento sin conexión</h3><div className="module-fields"><label className="module-field">Lote<select required value={offline.lote_codigo} onChange={e=>setOffline(v=>({...v,lote_codigo:e.target.value}))}><option value="">Selecciona un lote</option>{(data?.lotes||[]).map(l=><option key={l.id} value={l.codigo_trazabilidad}>{l.id} · {l.codigo_trazabilidad}</option>)}</select></label><label className="module-field">Tipo de evento<select value={offline.tipo_evento} onChange={e=>setOffline(v=>({...v,tipo_evento:e.target.value}))}>{(data?.tipos_evento||[]).map(t=><option key={t} value={t}>{t}</option>)}</select></label><label className="module-field">Detalle (opcional)<input value={offline.detalle} onChange={e=>setOffline(v=>({...v,detalle:e.target.value}))}/></label></div><button className="secondary-button"><ClipboardList/> Guardar evento en dispositivo</button></form><div className="sync-card"><CloudUpload/><div><h3>Cola pendiente: {queue.length} eventos</h3><p className="sub">Los eventos se conservan en este navegador hasta sincronizarlos correctamente.</p><button className="primary-button" disabled={busy||!queue.length} onClick={sendOffline}>Sincronizar ahora</button></div></div></>:<><div className="module-toolbar"><div className="search-box"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar en los registros…"/></div><span className="sub">{filtered.length} registros</span></div><div className="table-wrap"><table><thead><tr>{(cols[tab]||[]).map(c=><th key={c}>{c.replaceAll('_',' ')}</th>)}<th>Acciones</th></tr></thead><tbody>{filtered.map((r,i)=><tr key={r.id||r.exportacion_id||i}>{(cols[tab]||[]).map(c=><td key={c}>{typeof r[c]==='boolean'?(r[c]?'Sí':'No'):r[c]??'—'}</td>)}<td><div className="row-actions"><button onClick={()=>setDetail(r)}>Ver</button>{tab==='productores'&&!r.validado&&<button onClick={()=>act(`/productores/${r.id}/validar`)}>Validar</button>}{tab==='predios'&&!r.ubicacion_verificada&&<button onClick={()=>act(`/predios/${r.id}/verificar`)}>Verificar</button>}{tab==='alertas'&&r.estado==='ABIERTA'&&<button onClick={()=>{const nota=prompt('Nota de resolución (mínimo 3 caracteres):');if(nota)act(`/alertas/${r.id}/resolver`,'PATCH',{nota_resolucion:nota})}}>Resolver</button>}{tab==='exportaciones'&&r.estado==='PENDIENTE'&&<><button onClick={()=>act(`/exportaciones/${r.exportacion_id}/recalcular`,'POST')}>Recalcular</button><button onClick={()=>act(`/exportaciones/${r.exportacion_id}/aprobar`)}>Aprobar</button><button onClick={()=>{const motivo=prompt('Motivo del rechazo (mínimo 5 caracteres):');if(motivo)act(`/exportaciones/${r.exportacion_id}/rechazar`,'PATCH',{motivo_rechazo:motivo})}}>Rechazar</button></>}</div></td></tr>)}</tbody></table>{!filtered.length&&<div className="empty"><ClipboardList/><p>No hay registros para mostrar o tu perfil no tiene permiso para consultarlos.</p></div>}</div></>}
- {detail&&<div className="detail-box"><div className="panel-head"><h3>Detalle del registro</h3><button className="text-button" onClick={()=>setDetail(null)}>Cerrar</button></div><pre>{JSON.stringify(detail,null,2)}</pre></div>}
+ {detail&&<DetailView tab={tab} record={detail} onClose={()=>setDetail(null)}/>}
  </section></>;
 }
+
+const DETAIL_LABELS={
+ id:'Identificador', productor_id:'Productor asociado', nombre:'Nombre', nombre_razon_social:'Nombre o razón social',
+ codigo_catastral:'Código catastral', matricula_inmobiliaria:'Matrícula inmobiliaria', area_m2:'Área del predio',
+ latitud:'Latitud', longitud:'Longitud', municipio_codigo:'Código del municipio', municipio:'Municipio',
+ departamento:'Departamento', zona_priorizada:'Zona priorizada', propietario:'Propietario',
+ ubicacion_verificada:'Ubicación verificada', verificado_por:'Verificado por', verificado_en:'Fecha de verificación',
+ referencia_fondo_tierras:'Referencia del fondo de tierras', estado_predio:'Estado del predio', creado_en:'Fecha de creación',
+ completo:'Registro completo', numero_documento:'Número de documento', tipo_documento:'Tipo de documento',
+ tipo_productor:'Tipo de productor', telefono:'Teléfono', email:'Correo electrónico', estado:'Estado',
+ validado:'Validado', pertenece_comunidad_etnica:'Pertenece a comunidad étnica', consentimiento_datos:'Consentimiento de datos',
+ codigo_trazabilidad:'Código de trazabilidad', producto:'Producto', entidad:'Entidad', tipo:'Tipo',
+ severidad:'Severidad', descripcion:'Descripción', exportacion_id:'Número de exportación', pais_destino:'País de destino',
+ pct_completo:'Porcentaje completado', usuario_id:'Usuario', accion:'Acción', tabla_afectada:'Tabla afectada',
+ registro_id:'Registro relacionado', creado_por:'Creado por', activo:'Usuario activo', rol:'Rol',
+ entidad_id:'Entidad asociada', fecha_evento:'Fecha del evento', fecha:'Fecha'
+};
+const DETAIL_GROUPS={
+ predios:[
+  ['Información del predio',['nombre','propietario','productor_id','codigo_catastral','matricula_inmobiliaria','referencia_fondo_tierras','area_m2','estado_predio','completo']],
+  ['Ubicación geográfica',['municipio','departamento','municipio_codigo','zona_priorizada','latitud','longitud']],
+  ['Verificación y registro',['ubicacion_verificada','verificado_por','verificado_en','creado_en']]
+ ],
+ productores:[
+  ['Información del productor',['nombre_razon_social','tipo_documento','numero_documento','tipo_productor','telefono','email']],
+  ['Ubicación y caracterización',['municipio','departamento','municipio_codigo','pertenece_comunidad_etnica']],
+  ['Validación y consentimiento',['estado','validado','consentimiento_datos','consentimiento_acta','consentimiento_fecha','creado_en']]
+ ],
+ alertas:[
+  ['Información de la alerta',['codigo_trazabilidad','producto','entidad','tipo','severidad','descripcion']],
+  ['Estado y seguimiento',['estado','nota_resolucion','motivo_resolucion','creado_en','fecha_resolucion']]
+ ],
+ exportaciones:[
+  ['Información de exportación',['codigo_trazabilidad','pais_destino','estado','pct_completo','creado_en','aprobado_en']]
+ ],
+ usuarios:[
+  ['Información del usuario',['nombre','email','rol','entidad','entidad_id','activo','creado_en']]
+ ],
+ auditoria:[
+  ['Registro de auditoría',['usuario_id','accion','tabla_afectada','registro_id','creado_en','detalle']]
+ ]
+};
+function humanLabel(key){return DETAIL_LABELS[key]||key.replaceAll('_',' ').replace(/^\w/,c=>c.toUpperCase())}
+function displayDetailValue(key,value){
+ if(value===null||value===undefined||value==='')return 'No registrado';
+ if(typeof value==='boolean')return value?'Sí':'No';
+ if(key==='area_m2'&&Number.isFinite(Number(value)))return `${Number(value).toLocaleString('es-CO')} m² (${(Number(value)/10000).toLocaleString('es-CO',{maximumFractionDigits:2})} ha)`;
+ if(['creado_en','verificado_en','fecha_evento','fecha_resolucion','aprobado_en','consentimiento_fecha'].includes(key))return date(value);
+ if(typeof value==='object')return Array.isArray(value)?value.join(', '):Object.entries(value).map(([k,v])=>`${humanLabel(k)}: ${v??'—'}`).join(' · ');
+ if(key==='pct_completo'&&Number.isFinite(Number(value)))return `${value}%`;
+ return String(value);
+}
+function DetailView({tab,record,onClose}){
+ const sections=DETAIL_GROUPS[tab]||[['Información del registro',Object.keys(record||{})]];
+ const shown=new Set(sections.flatMap(s=>s[1]));
+ const extra=Object.keys(record||{}).filter(k=>!shown.has(k)&&!['password','token'].includes(k));
+ const heading=record.nombre||record.nombre_razon_social||record.producto||record.codigo_trazabilidad||record.email||`Registro #${record.id??record.exportacion_id??''}`;
+ const status=record.estado_predio||record.estado||(record.completo?'COMPLETO':null);
+ return <section className="detail-box" aria-label="Detalle del registro">
+  <div className="detail-header">
+   <div><p className="section-kicker">INFORMACIÓN DEL REGISTRO</p><h3>{heading}</h3><p className="detail-reference">Registro #{record.id??record.exportacion_id??'—'}</p></div>
+   <div className="detail-header-actions">{status&&<span className={`detail-status ${String(status).toLowerCase()==='completo'||String(status).toLowerCase()==='aprobada'?'is-good':''}`}>{String(status).replaceAll('_',' ')}</span>}<button className="text-button" onClick={onClose}>Cerrar ×</button></div>
+  </div>
+  {sections.map(([title,keys])=>{
+   const entries=keys.filter(k=>record[k]!==undefined);
+   if(!entries.length)return null;
+   return <div className="detail-section" key={title}><h4>{title}</h4><div className="detail-grid">{entries.map(key=><div className="detail-item" key={key}><span>{humanLabel(key)}</span><strong>{displayDetailValue(key,record[key])}</strong></div>)}</div></div>
+  })}
+  {extra.length>0&&<div className="detail-section"><h4>Información adicional</h4><div className="detail-grid">{extra.map(key=><div className="detail-item" key={key}><span>{humanLabel(key)}</span><strong>{displayDetailValue(key,record[key])}</strong></div>)}</div></div>}
+ </section>
+}
+
 function Field({label,name,value,set,options,type='text'}){return <label className="module-field">{label}{options?<select required value={value[name]??''} onChange={e=>set(v=>({...v,[name]:e.target.value}))}><option value="">Seleccionar…</option>{options.map(o=>typeof o==='string'?<option key={o} value={o}>{o}</option>:<option key={o.value} value={o.value}>{o.label}</option>)}</select>:<input required={['nombre','email','password','tipo_documento','numero_documento','tipo_productor','municipio_codigo','area_m2','latitud','longitud','lote_id','pais_destino','tipo','severidad','descripcion','productor_id','rol'].includes(name)} type={type} value={value[name]??''} onChange={e=>set(v=>({...v,[name]:e.target.value}))}/>}</label>}
